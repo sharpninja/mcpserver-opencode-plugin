@@ -1,0 +1,65 @@
+{
+  "name": "@sharpninja/mcpserver-opencode-plugin",
+  "version": "0.1.0",
+  "description": "OpenCode plugin for McpServer TODO, session-log, requirements, GraphRAG, workspace initialization, and failsafe replay workflows.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --no-cache",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "files": [
+    "dist/",
+    "lib/",
+    "skills/",
+    "README.md"
+  ],
+  "keywords": [
+    "mcp",
+    "opencode",
+    "opencode-plugin",
+    "mcpserver",
+    "todo",
+    "session-log",
+    "requirements",
+    "graphrag",
+    "ai-tools"
+  ],
+  "author": {
+    "name": "Payton Byrd (The Sharp Ninja)",
+    "url": "https://github.com/sharpninja"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/sharpninja/mcpserver-opencode-plugin",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sharpninja/mcpserver-opencode-plugin.git"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "latest",
+    "js-yaml": "^4.1.0"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "latest"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

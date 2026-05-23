@@ -1,0 +1,6 @@
+AGENTS-README-FIRST.yaml
+.mcpServer/
+node_modules/
+dist/
+coverage/
+mcp.db
