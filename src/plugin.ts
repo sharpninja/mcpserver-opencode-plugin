@@ -29,7 +29,7 @@ export const allToolDescriptors: ToolDescriptor[] = [
   ...graphragTools,
 ];
 
-function utcStamp(date = new Date()): string {
+export function utcStamp(date = new Date()): string {
   return (
     date.getUTCFullYear().toString() +
     (date.getUTCMonth() + 1).toString().padStart(2, '0') +
@@ -42,21 +42,21 @@ function utcStamp(date = new Date()): string {
   );
 }
 
-function slug(value: string): string {
+export function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'run';
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
+export function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
-function stringValue(value: unknown): string | undefined {
+export function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-function contextWorkspacePath(value: unknown): string | undefined {
+export function contextWorkspacePath(value: unknown): string | undefined {
   const record = asRecord(value);
   return (
     stringValue(record.workspacePath) ||
@@ -68,7 +68,7 @@ function contextWorkspacePath(value: unknown): string | undefined {
   );
 }
 
-function contextPrompt(value: unknown): string {
+export function contextPrompt(value: unknown): string {
   const record = asRecord(value);
   const snapshot = asRecord(record.snapshot);
   return (
@@ -82,14 +82,14 @@ function contextPrompt(value: unknown): string {
   );
 }
 
-function toolName(value: unknown): string {
+export function toolName(value: unknown): string {
   const record = asRecord(value);
   const toolCall = asRecord(record.toolCall);
   const toolObj = asRecord(record.tool);
   return stringValue(toolCall.name) || stringValue(toolObj.name) || stringValue(record.toolName) || stringValue(record.name) || 'unknown_tool';
 }
 
-function toolInput(value: unknown): unknown {
+export function toolInput(value: unknown): unknown {
   const record = asRecord(value);
   if (Object.prototype.hasOwnProperty.call(record, 'input')) return record.input;
   const toolCall = asRecord(record.toolCall);
@@ -97,7 +97,7 @@ function toolInput(value: unknown): unknown {
   return undefined;
 }
 
-function toolError(value: unknown): string | undefined {
+export function toolError(value: unknown): string | undefined {
   const record = asRecord(value);
   const error = record.error;
   if (error instanceof Error) return error.message;
@@ -109,6 +109,26 @@ function toolError(value: unknown): string | undefined {
   return undefined;
 }
 
+function eventPayload(value: unknown): Record<string, unknown> {
+  const record = asRecord(value);
+  const nested = asRecord(record.event);
+  return Object.keys(nested).length > 0 ? nested : record;
+}
+
+function eventName(value: unknown): string | undefined {
+  const record = asRecord(value);
+  const nested = asRecord(record.event);
+  return stringValue(nested.type) || stringValue(nested.name) || stringValue(record.type) || stringValue(record.name);
+}
+
+function isStartEvent(name: string): boolean {
+  return /^(session|run|message)[._-](start|started|begin|began)$/i.test(name);
+}
+
+function isCompleteEvent(name: string): boolean {
+  return /^(session|run|message)[._-](complete|completed|end|ended|stop|stopped|fail|failed|error)$/i.test(name);
+}
+
 function setMarkerEnvironment(marker: MarkerContext, agentName: string): void {
   process.env.MCPSERVER_BASE_URL = marker.baseUrl;
   process.env.MCPSERVER_API_KEY = marker.apiKey;
@@ -118,7 +138,7 @@ function setMarkerEnvironment(marker: MarkerContext, agentName: string): void {
   process.env.PLUGIN_AGENT_NAME = agentName;
 }
 
-function jsonPropToZod(prop: Record<string, unknown>, _desc: string): z.ZodTypeAny {
+export function jsonPropToZod(prop: Record<string, unknown>, _desc: string): z.ZodTypeAny {
   const types = Array.isArray(prop.type) ? prop.type : [prop.type];
 
   if (types.includes('boolean')) return z.boolean();
@@ -143,7 +163,7 @@ function jsonPropToZod(prop: Record<string, unknown>, _desc: string): z.ZodTypeA
   return z.string();
 }
 
-function jsonSchemaToZodShape(descriptor: ToolDescriptor): Record<string, z.ZodTypeAny> {
+export function jsonSchemaToZodShape(descriptor: ToolDescriptor): Record<string, z.ZodTypeAny> {
   const props = (descriptor.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
   const required = new Set((descriptor.inputSchema as { required?: string[] })?.required ?? []);
   const shape: Record<string, z.ZodTypeAny> = {};
@@ -158,7 +178,7 @@ function jsonSchemaToZodShape(descriptor: ToolDescriptor): Record<string, z.ZodT
   return shape;
 }
 
-function wrapResult(payload: Record<string, unknown>, name: string): ToolResult {
+export function wrapResult(payload: Record<string, unknown>, name: string): ToolResult {
   const result = payload.result;
   const output = typeof result === 'string'
     ? result
@@ -326,6 +346,17 @@ export async function createMcpServerPlugin(
 
   return {
     tool: hooksTools as Record<string, never>,
+    event: async (input: { event: unknown }): Promise<void> => {
+      const name = eventName(input);
+      if (!name) return;
+
+      const payload = eventPayload(input);
+      if (isStartEvent(name)) {
+        await startSession(payload);
+      } else if (isCompleteEvent(name)) {
+        await completeSession(payload);
+      }
+    },
     'tool.execute.before': async (
       input: { tool: string; sessionID: string; callID: string },
       _output: { args: Record<string, unknown> },

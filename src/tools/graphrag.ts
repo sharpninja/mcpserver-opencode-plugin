@@ -239,7 +239,7 @@ function addStringQuery(url: URL, args: Record<string, unknown>, key: string, qu
   if (value) url.searchParams.set(queryKey, value);
 }
 
-function pickBody(args: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+export function pickBody(args: Record<string, unknown>, keys: string[]): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   for (const key of keys) {
     const value = args[key];
@@ -248,7 +248,7 @@ function pickBody(args: Record<string, unknown>, keys: string[]): Record<string,
   return body;
 }
 
-async function parseHttpResponse(response: Response): Promise<{ contentType: string; result: unknown; bodyText: string }> {
+export async function parseHttpResponse(response: Response): Promise<{ contentType: string; result: unknown; bodyText: string }> {
   const contentType = response.headers.get('content-type')?.split(';')[0] || 'application/json';
   const bodyText = await response.text().catch(() => '');
   if (!bodyText) return { contentType, result: { success: response.ok }, bodyText };
@@ -261,11 +261,11 @@ async function parseHttpResponse(response: Response): Promise<{ contentType: str
   return { contentType, result: bodyText, bodyText };
 }
 
-function jsonInit(method: string, headers: Record<string, string>, body: Record<string, unknown>): RequestInit {
+export function jsonInit(method: string, headers: Record<string, string>, body: Record<string, unknown>): RequestInit {
   return { method, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-async function graphragHttpFallback(name: string, args: Record<string, unknown>): Promise<ReplResponse | null> {
+export async function graphragHttpFallback(name: string, args: Record<string, unknown>): Promise<ReplResponse | null> {
   const fetchFn = globalThis.fetch;
   const apiKey = process.env.MCPSERVER_API_KEY;
   const workspacePath = process.env.MCPSERVER_WORKSPACE_PATH ?? process.env.MCP_WORKSPACE_PATH;

@@ -207,7 +207,7 @@ export function canHandleTodoTool(name: string): boolean {
   return name in toolMethodMap || internalTodoTools.has(name);
 }
 
-function boolToEnabled(value: unknown): boolean | undefined {
+export function boolToEnabled(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') return value;
   if (typeof value !== 'string') return undefined;
 
@@ -217,7 +217,7 @@ function boolToEnabled(value: unknown): boolean | undefined {
   return undefined;
 }
 
-function internalTodoCacheDir(): string {
+export function internalTodoCacheDir(): string {
   return (
     process.env.MCPSERVER_PLUGIN_CACHE_DIR ||
     process.env.MCP_PLUGIN_CACHE_DIR ||
@@ -231,11 +231,11 @@ function internalTodoCacheDir(): string {
   );
 }
 
-function internalTodoStateFile(): string {
+export function internalTodoStateFile(): string {
   return process.env.MCPSERVER_INTERNAL_TODO_STATE_FILE || path.join(internalTodoCacheDir(), 'internal-todo.yaml');
 }
 
-function internalTodoModeValue(): { enabled: boolean; source: 'environment' | 'cache' | 'default'; stateFile: string } {
+export function internalTodoModeValue(): { enabled: boolean; source: 'environment' | 'cache' | 'default'; stateFile: string } {
   const stateFile = internalTodoStateFile();
   const envValue =
     process.env.MCP_CODEX_INTERNAL_TODO ?? process.env.MCPSERVER_CODEX_INTERNAL_TODO ?? process.env.CODEX_MCP_TODO;
@@ -258,7 +258,7 @@ function setInternalTodoMode(enabled: boolean): void {
   fs.writeFileSync(stateFile, `enabled: ${enabled}\nupdatedAt: ${new Date().toISOString()}\n`, 'utf8');
 }
 
-function requestedInternalTodoMode(args: Record<string, unknown>): boolean | undefined {
+export function requestedInternalTodoMode(args: Record<string, unknown>): boolean | undefined {
   const source = unwrapRequest(args);
   return (
     boolToEnabled(source.enabled) ??
@@ -293,7 +293,7 @@ async function handleInternalTodoTool(name: string, args: Record<string, unknown
   return { result: internalTodoModeValue() };
 }
 
-function stringArg(args: Record<string, unknown>, ...keys: string[]): string {
+export function stringArg(args: Record<string, unknown>, ...keys: string[]): string {
   for (const key of keys) {
     const value = args[key];
     if (typeof value === 'string' && value.trim().length > 0) return value.trim();
@@ -301,7 +301,7 @@ function stringArg(args: Record<string, unknown>, ...keys: string[]): string {
   return '';
 }
 
-function unwrapRequest(args: Record<string, unknown>): Record<string, unknown> {
+export function unwrapRequest(args: Record<string, unknown>): Record<string, unknown> {
   const request = args.request;
   if (request && typeof request === 'object' && !Array.isArray(request)) {
     return request as Record<string, unknown>;
@@ -309,12 +309,12 @@ function unwrapRequest(args: Record<string, unknown>): Record<string, unknown> {
   return args;
 }
 
-function normalizeSection(value: unknown): string | undefined {
+export function normalizeSection(value: unknown): string | undefined {
   if (typeof value !== 'string' || value.trim().length === 0) return undefined;
   return value.trim().toLowerCase() === 'ui' ? 'UI' : 'Backlog';
 }
 
-function stringList(value: unknown): string[] | undefined {
+export function stringList(value: unknown): string[] | undefined {
   if (Array.isArray(value)) {
     const values = value
       .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
@@ -325,7 +325,7 @@ function stringList(value: unknown): string[] | undefined {
   return undefined;
 }
 
-function implementationTasks(value: unknown): Array<{ task: string; done: boolean }> | undefined {
+export function implementationTasks(value: unknown): Array<{ task: string; done: boolean }> | undefined {
   if (typeof value === 'string' && value.trim().length > 0) {
     return [{ task: value.trim(), done: false }];
   }
@@ -349,7 +349,7 @@ function implementationTasks(value: unknown): Array<{ task: string; done: boolea
   return tasks.length > 0 ? tasks : undefined;
 }
 
-function todoBody(args: Record<string, unknown>, includeId: boolean): Record<string, unknown> {
+export function todoBody(args: Record<string, unknown>, includeId: boolean): Record<string, unknown> {
   const source = unwrapRequest(args);
   const body: Record<string, unknown> = {};
 
@@ -388,7 +388,7 @@ function todoBody(args: Record<string, unknown>, includeId: boolean): Record<str
   return body;
 }
 
-async function parseHttpResponseBody(response: Response): Promise<{ bodyText: string; contentType: string; result: unknown }> {
+export async function parseHttpResponseBody(response: Response): Promise<{ bodyText: string; contentType: string; result: unknown }> {
   const contentType = response.headers.get('content-type')?.split(';')[0] || 'application/json';
   const bodyText = await response.text().catch(() => '');
   let result: unknown = bodyText;
@@ -403,7 +403,7 @@ async function parseHttpResponseBody(response: Response): Promise<{ bodyText: st
   return { bodyText, contentType, result };
 }
 
-async function todoHttpFallback(
+export async function todoHttpFallback(
   name: string,
   args: Record<string, unknown>,
 ): Promise<ReplResponse | null> {

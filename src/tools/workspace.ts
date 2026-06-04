@@ -24,7 +24,7 @@ export function canHandleWorkspaceTool(name: string): boolean {
   return name === 'workspace_ensure';
 }
 
-function stringArg(args: Record<string, unknown>, ...keys: string[]): string {
+export function stringArg(args: Record<string, unknown>, ...keys: string[]): string {
   for (const key of keys) {
     const value = args[key];
     if (typeof value === 'string' && value.trim().length > 0) return value.trim();
@@ -32,11 +32,11 @@ function stringArg(args: Record<string, unknown>, ...keys: string[]): string {
   return '';
 }
 
-function normalizePath(value: string): string {
+export function normalizePath(value: string): string {
   return path.resolve(value).replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
 }
 
-function workspaceKey(workspacePath: string): string {
+export function workspaceKey(workspacePath: string): string {
   return Buffer.from(workspacePath.trim(), 'utf8')
     .toString('base64')
     .replace(/=+$/g, '')
@@ -44,7 +44,7 @@ function workspaceKey(workspacePath: string): string {
     .replace(/\//g, '_');
 }
 
-function findWorkspace(listResponse: ReplResponse, workspacePath: string): Record<string, unknown> | null {
+export function findWorkspace(listResponse: ReplResponse, workspacePath: string): Record<string, unknown> | null {
   const payload = listResponse.payload as { result?: unknown };
   const result = payload.result;
   const items = result && typeof result === 'object' && !Array.isArray(result)
@@ -63,7 +63,7 @@ function findWorkspace(listResponse: ReplResponse, workspacePath: string): Recor
   return null;
 }
 
-async function invokeOrThrow(bridge: ReplBridge, method: string, params: Record<string, unknown>): Promise<ReplResponse> {
+export async function invokeOrThrow(bridge: ReplBridge, method: string, params: Record<string, unknown>): Promise<ReplResponse> {
   const response = await bridge.invoke(method, params);
   if (response.type === 'error') {
     const payload = response.payload as { code?: string; message?: string };

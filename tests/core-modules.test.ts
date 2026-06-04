@@ -503,6 +503,16 @@ describe('SessionShim', () => {
     expect(shim.getState().status).toBe('completed');
   });
 
+  test('close and failTurn apply default branches', () => {
+    shim.close({ agent: 'TestAgent', sessionId: 'TA-001' });
+    expect(shim.getState().status).toBe('completed');
+
+    shim.open({ agent: 'TestAgent', sessionId: 'TA-002', title: 'Test' });
+    shim.beginTurn({ requestId: 'req-002', queryTitle: 'Q', queryText: 'Query text' });
+    shim.failTurn({ errorMessage: 'Something broke' });
+    expect(shim.getState().turns[0].errorCode).toBeUndefined();
+  });
+
   test('buildSubmitPayload builds correct structure', () => {
     shim.open({ agent: 'TestAgent', sessionId: 'TA-001', title: 'Test session', model: 'gpt-4' });
     shim.beginTurn({ requestId: 'req-001', queryTitle: 'Query', queryText: 'Do something' });
@@ -511,6 +521,35 @@ describe('SessionShim', () => {
     expect(payload.sessionLog).toBeDefined();
     expect(payload.sessionLog.sourceType).toBe('TestAgent');
     expect(payload.sessionLog.turns).toHaveLength(1);
+  });
+
+  test('buildSubmitPayload serializes current turn optional fields', () => {
+    shim.open({ agent: 'TestAgent', sessionId: 'TA-001', title: 'Test session' });
+    shim.beginTurn({ requestId: 'req-001', queryTitle: 'Query', queryText: 'Do something' });
+    shim.updateTurn({
+      response: 'Partial',
+      interpretation: 'Working',
+      tokenCount: 42,
+      tags: ['tag'],
+      contextList: ['ctx'],
+    });
+    shim.appendActions({ actions: [{ order: 1, description: 'edit file', type: 'edit', status: 'completed' }] });
+    shim.appendDialog({
+      dialogItems: [{ timestamp: new Date().toISOString(), role: 'model', content: 'decision', category: 'decision' }],
+    });
+
+    const payload = shim.buildSubmitPayload();
+    const turn = payload.sessionLog.turns[0];
+    expect(payload.sessionLog.model).toBeUndefined();
+    expect(turn).toMatchObject({
+      response: 'Partial',
+      interpretation: 'Working',
+      tokenCount: 42,
+      tags: ['tag'],
+      contextList: ['ctx'],
+    });
+    expect(turn.actions).toHaveLength(1);
+    expect(turn.dialogItems).toHaveLength(1);
   });
 
   test('buildSubmitPayload throws without session', () => {
@@ -671,6 +710,26 @@ describe('workspace tool handlers', () => {
     expect(canHandleWorkspaceTool('workspace_other')).toBe(false);
   });
 
+  test('workspace helper branches normalize strings, keys, lookup, and bridge errors', async () => {
+    const mod = await import('../src/tools/workspace.js');
+    expect(mod.stringArg({ path: '  F:/GitHub/McpServer  ' }, 'workspacePath', 'path')).toBe('F:/GitHub/McpServer');
+    expect(mod.stringArg({ path: '' }, 'path')).toBe('');
+    expect(mod.normalizePath('F:/GitHub/McpServer/')).toMatch(/f:\\github\\mcpserver$/i);
+    expect(mod.workspaceKey('F:\\GitHub\\McpServer')).not.toContain('=');
+    expect(mod.workspaceKey('F:\\GitHub\\McpServer')).not.toContain('+');
+    expect(mod.workspaceKey('F:\\GitHub\\McpServer')).not.toContain('/');
+
+    expect(mod.findWorkspace({ type: 'result', payload: { result: 'bad' } }, tmpDir)).toBeNull();
+    expect(mod.findWorkspace({ type: 'result', payload: { result: { items: 'bad' } } }, tmpDir)).toBeNull();
+    expect(mod.findWorkspace({ type: 'result', payload: { result: { items: [null, { workspacePath: tmpDir }] } } }, tmpDir)).toEqual({ workspacePath: tmpDir });
+    expect(mod.findWorkspace({ type: 'result', payload: { result: { items: [{ workspacePath: join(tmpDir, 'other') }] } } }, tmpDir)).toBeNull();
+
+    const okBridge = { invoke: jest.fn().mockResolvedValue({ type: 'result', payload: { ok: true } }) } as unknown as ReplBridge;
+    await expect(mod.invokeOrThrow(okBridge, 'method', {})).resolves.toEqual({ type: 'result', payload: { ok: true } });
+    const errorBridge = { invoke: jest.fn().mockResolvedValue({ type: 'error', payload: {} }) } as unknown as ReplBridge;
+    await expect(mod.invokeOrThrow(errorBridge, 'method', {})).rejects.toThrow('error: Unknown error');
+  });
+
   test('handleWorkspaceTool bootstrap failure recovery', async () => {
     const { handleWorkspaceTool } = await import('../src/tools/workspace.js');
     const bridge = {
@@ -777,6 +836,66 @@ describe('workspace tool handlers', () => {
     } as unknown as ReplBridge;
     await expect(handleWorkspaceTool('workspace_ensure', {}, bridge, tmpDir)).rejects.toThrow();
   });
+
+  test('handleWorkspaceTool resolves path sources and create options', async () => {
+    const { handleWorkspaceTool } = await import('../src/tools/workspace.js');
+    const explicitBridge = {
+      invoke: jest.fn<(...args: any[]) => any>().mockImplementation(async (method: string, params: Record<string, unknown>) => {
+        if (method === 'client.Workspace.ListAsync') {
+          return { type: 'result', payload: { result: { items: [] } } };
+        }
+        if (method === 'client.Workspace.CreateAsync') {
+          return { type: 'result', payload: { result: { createdFrom: params } } };
+        }
+        return { type: 'result', payload: { result: { key: 'init' } } };
+      }),
+    } as unknown as ReplBridge;
+
+    const explicit = await handleWorkspaceTool('workspace_ensure', {
+      workspacePath: tmpDir,
+      name: 'Custom Name',
+      todoPath: 'docs/todo.yaml',
+    }, explicitBridge);
+    expect(explicit.created).toBe(true);
+    expect(explicit.workspace).toEqual({
+      createdFrom: {
+        request: {
+          workspacePath: tmpDir,
+          name: 'Custom Name',
+          todoPath: 'docs/todo.yaml',
+        },
+      },
+    });
+
+    const serverEnvPath = join(tmpDir, 'server-env');
+    process.env.MCPSERVER_WORKSPACE_PATH = serverEnvPath;
+    const serverEnvBridge = {
+      invoke: jest.fn<(...args: any[]) => any>().mockImplementation(async (method: string) => {
+        if (method === 'client.Workspace.ListAsync') {
+          return { type: 'result', payload: { result: { items: [{ workspacePath: serverEnvPath }] } } };
+        }
+        return { type: 'result', payload: { result: { key: 'init' } } };
+      }),
+    } as unknown as ReplBridge;
+    const serverEnv = await handleWorkspaceTool('workspace_ensure', {}, serverEnvBridge);
+    expect(serverEnv.workspacePath).toBe(serverEnvPath);
+    expect(serverEnv.created).toBe(false);
+
+    delete process.env.MCPSERVER_WORKSPACE_PATH;
+    const mcpEnvPath = join(tmpDir, 'mcp-env');
+    process.env.MCP_WORKSPACE_PATH = mcpEnvPath;
+    const mcpEnvBridge = {
+      invoke: jest.fn<(...args: any[]) => any>().mockImplementation(async (method: string) => {
+        if (method === 'client.Workspace.ListAsync') {
+          return { type: 'result', payload: { result: { items: [{ workspacePath: mcpEnvPath }] } } };
+        }
+        return { type: 'result', payload: { result: { key: 'init' } } };
+      }),
+    } as unknown as ReplBridge;
+    const mcpEnv = await handleWorkspaceTool('workspace_ensure', {}, mcpEnvBridge);
+    expect(mcpEnv.workspacePath).toBe(mcpEnvPath);
+    expect(mcpEnv.created).toBe(false);
+  });
 });
 
 /* ================================================================
@@ -795,6 +914,174 @@ describe('todo tool handlers', () => {
     expect(canHandleTodoTool('todo_internal_disable')).toBe(true);
     expect(canHandleTodoTool('todo_internal_tracking')).toBe(true);
     expect(canHandleTodoTool('todo_nonexistent')).toBe(false);
+  });
+
+  test('todo helper branches normalize env, request, lists, tasks, and bodies', async () => {
+    const mod = await import('../src/tools/todo.js');
+
+    expect(mod.boolToEnabled(true)).toBe(true);
+    expect(mod.boolToEnabled(false)).toBe(false);
+    expect(mod.boolToEnabled('"enabled"')).toBe(true);
+    expect(mod.boolToEnabled('mcpserver')).toBe(true);
+    expect(mod.boolToEnabled('local')).toBe(false);
+    expect(mod.boolToEnabled('unknown')).toBeUndefined();
+    expect(mod.boolToEnabled(1)).toBeUndefined();
+
+    process.env.MCPSERVER_PLUGIN_CACHE_DIR = join(tmpDir, 'plugin-cache');
+    expect(mod.internalTodoCacheDir()).toBe(join(tmpDir, 'plugin-cache'));
+    delete process.env.MCPSERVER_PLUGIN_CACHE_DIR;
+    process.env.MCP_PLUGIN_CACHE_DIR = join(tmpDir, 'mcp-plugin-cache');
+    expect(mod.internalTodoCacheDir()).toBe(join(tmpDir, 'mcp-plugin-cache'));
+    delete process.env.MCP_PLUGIN_CACHE_DIR;
+    process.env.MCPSERVER_CACHE_DIR = join(tmpDir, 'server-cache');
+    expect(mod.internalTodoCacheDir()).toBe(join(tmpDir, 'server-cache'));
+    delete process.env.MCPSERVER_CACHE_DIR;
+    process.env.MCP_CACHE_DIR = join(tmpDir, 'mcp-cache');
+    expect(mod.internalTodoCacheDir()).toBe(join(tmpDir, 'mcp-cache'));
+    delete process.env.MCP_CACHE_DIR;
+    process.env.MCPSERVER_WORKSPACE_PATH = tmpDir;
+    expect(mod.internalTodoCacheDir()).toContain(join(tmpDir, '.mcpServer', 'opencode-plugin'));
+
+    process.env.MCPSERVER_INTERNAL_TODO_STATE_FILE = join(tmpDir, 'internal.yaml');
+    expect(mod.internalTodoStateFile()).toBe(join(tmpDir, 'internal.yaml'));
+    process.env.MCP_CODEX_INTERNAL_TODO = 'on';
+    expect(mod.internalTodoModeValue()).toMatchObject({ enabled: true, source: 'environment' });
+    delete process.env.MCP_CODEX_INTERNAL_TODO;
+    writeFileSync(join(tmpDir, 'internal.yaml'), 'enabled: off\n', 'utf8');
+    expect(mod.internalTodoModeValue()).toMatchObject({ enabled: false, source: 'cache' });
+
+    expect(mod.requestedInternalTodoMode({ request: { enabled: 'yes' } })).toBe(true);
+    expect(mod.requestedInternalTodoMode({ mode: 'off' })).toBe(false);
+    expect(mod.requestedInternalTodoMode({ mcpTodo: 'mcp' })).toBe(true);
+    expect(mod.requestedInternalTodoMode({ mcpBacked: 'codex' })).toBe(false);
+    expect(mod.requestedInternalTodoMode({})).toBeUndefined();
+
+    expect(mod.stringArg({ a: '  value  ' }, 'missing', 'a')).toBe('value');
+    expect(mod.stringArg({ a: '' }, 'a')).toBe('');
+    expect(mod.unwrapRequest({ request: { title: 'wrapped' } })).toEqual({ title: 'wrapped' });
+    expect(mod.unwrapRequest({ request: ['nope'], title: 'plain' })).toEqual({ request: ['nope'], title: 'plain' });
+    expect(mod.normalizeSection(' ui ')).toBe('UI');
+    expect(mod.normalizeSection('api')).toBe('Backlog');
+    expect(mod.normalizeSection('')).toBeUndefined();
+    expect(mod.normalizeSection(1)).toBeUndefined();
+
+    expect(mod.stringList([' one ', 2, '', 'two'])).toEqual(['one', 'two']);
+    expect(mod.stringList(' single ')).toEqual(['single']);
+    expect(mod.stringList([''])).toBeUndefined();
+    expect(mod.stringList(1)).toBeUndefined();
+
+    expect(mod.implementationTasks(' first ')).toEqual([{ task: 'first', done: false }]);
+    expect(mod.implementationTasks([' one ', '', { title: 'two', done: true }, { text: 'three' }, null])).toEqual([
+      { task: 'one', done: false },
+      { task: 'two', done: true },
+      { task: 'three', done: false },
+    ]);
+    expect(mod.implementationTasks([{ nope: true }])).toBeUndefined();
+    expect(mod.implementationTasks(1)).toBeUndefined();
+
+    expect(mod.todoBody({
+      request: {
+        id: 'T-1',
+        title: 'Title',
+        section: 'ui',
+        priority: 'high',
+        description: 'desc',
+        implementationTasks: 'step',
+        dependsOn: ['T-0'],
+        functionalRequirements: 'FR-1',
+        technicalRequirements: ['TR-1'],
+      },
+    }, true)).toMatchObject({
+      id: 'T-1',
+      title: 'Title',
+      section: 'UI',
+      priority: 'high',
+      description: ['desc'],
+      implementationTasks: [{ task: 'step', done: false }],
+      dependsOn: ['T-0'],
+      functionalRequirements: ['FR-1'],
+      technicalRequirements: ['TR-1'],
+    });
+  });
+
+  test('todo fallback helpers cover query, null, parse, and error branches', async () => {
+    const mod = await import('../src/tools/todo.js');
+
+    const parseFailure = await mod.parseHttpResponseBody({
+      headers: { get: () => null },
+      text: async () => { throw new Error('unreadable'); },
+    } as unknown as Response);
+    expect(parseFailure).toEqual({ bodyText: '', contentType: 'application/json', result: '' });
+
+    const invalidJson = await mod.parseHttpResponseBody({
+      headers: { get: () => 'application/json; charset=utf-8' },
+      text: async () => '{bad json',
+    } as unknown as Response);
+    expect(invalidJson.result).toBe('{bad json');
+
+    const plainText = await mod.parseHttpResponseBody({
+      headers: { get: () => 'text/plain' },
+      text: async () => 'plain',
+    } as unknown as Response);
+    expect(plainText).toEqual({ bodyText: 'plain', contentType: 'text/plain', result: 'plain' });
+
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+
+    try {
+      globalThis.fetch = undefined as unknown as typeof globalThis.fetch;
+      expect(await mod.todoHttpFallback('todo_query', {})).toBeNull();
+
+      process.env.MCPSERVER_API_KEY = 'test-key';
+      process.env.MCPSERVER_WORKSPACE_PATH = tmpDir;
+      process.env.MCPSERVER_BASE_URL = 'http://localhost:9999/';
+      globalThis.fetch = jest.fn<(...args: any[]) => any>().mockImplementation(async (url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return {
+          ok: calls.length !== 3,
+          status: 409,
+          headers: { get: () => 'application/json' },
+          text: async () => calls.length === 3 ? '' : JSON.stringify({ ok: true }),
+        } as Response;
+      }) as unknown as typeof globalThis.fetch;
+
+      await mod.todoHttpFallback('todo_query', {
+        title: 'search title',
+        priority: 'high',
+        section: 'UI',
+        id: 'T-1',
+        done: true,
+      });
+      const queryUrl = new URL(calls[0].url);
+      expect(queryUrl.searchParams.get('keyword')).toBe('search title');
+      expect(queryUrl.searchParams.get('priority')).toBe('high');
+      expect(queryUrl.searchParams.get('section')).toBe('UI');
+      expect(queryUrl.searchParams.get('id')).toBe('T-1');
+      expect(queryUrl.searchParams.get('done')).toBe('true');
+
+      await mod.todoHttpFallback('todo_query', { status: 'in-progress' });
+      expect(new URL(calls[1].url).searchParams.get('done')).toBe('false');
+
+      const error = await mod.todoHttpFallback('todo_query', {});
+      expect(error).toEqual({
+        type: 'error',
+        payload: {
+          code: 'http_error',
+          message: 'TODO HTTP fallback returned HTTP 409 for todo_query',
+        },
+      });
+
+      expect(await mod.todoHttpFallback('todo_get', {})).toBeNull();
+      expect(await mod.todoHttpFallback('todo_update', {})).toBeNull();
+      expect(await mod.todoHttpFallback('todo_delete', {})).toBeNull();
+      expect(await mod.todoHttpFallback('todo_analyze_requirements', {})).toBeNull();
+      expect(await mod.todoHttpFallback('todo_unknown', {})).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete process.env.MCPSERVER_API_KEY;
+      delete process.env.MCPSERVER_WORKSPACE_PATH;
+      delete process.env.MCPSERVER_BASE_URL;
+    }
   });
 
   test('handleTodoTool dispatches via bridge', async () => {
@@ -1360,6 +1647,13 @@ describe('dispatchSessionTool extra coverage', () => {
     await dispatchSessionTool(shim, bridge, 'session_begin_turn', { requestId: 'r', queryTitle: 'Q', queryText: 'T' });
     const result = await dispatchSessionTool(shim, bridge, 'session_update_turn', { response: 'R' });
     expect(result.type).toBe('error');
+
+    const defaultShim = new SessionShim();
+    const defaultBridge = { invoke: jest.fn().mockResolvedValue({ type: 'error', payload: {} }) };
+    await dispatchSessionTool(defaultShim, defaultBridge, 'session_open', { agent: 'A', sessionId: 'S2', title: 'T' });
+    await dispatchSessionTool(defaultShim, defaultBridge, 'session_begin_turn', { requestId: 'r2', queryTitle: 'Q', queryText: 'T' });
+    const defaultResult = await dispatchSessionTool(defaultShim, defaultBridge, 'session_update_turn', { response: 'R' });
+    expect(defaultResult.payload.message).toContain('Unknown error');
   });
 
   test('submitSessionWithFailsafe recovers from bridge throw', async () => {
@@ -1369,6 +1663,13 @@ describe('dispatchSessionTool extra coverage', () => {
     await dispatchSessionTool(shim, bridge, 'session_begin_turn', { requestId: 'r', queryTitle: 'Q', queryText: 'T' });
     const result = await dispatchSessionTool(shim, bridge, 'session_update_turn', { response: 'R' });
     expect(result.type).toBe('error');
+
+    const stringShim = new SessionShim();
+    const stringBridge = { invoke: jest.fn().mockRejectedValue('string failure') };
+    await dispatchSessionTool(stringShim, stringBridge, 'session_open', { agent: 'A', sessionId: 'S2', title: 'T' });
+    await dispatchSessionTool(stringShim, stringBridge, 'session_begin_turn', { requestId: 'r2', queryTitle: 'Q', queryText: 'T' });
+    const stringResult = await dispatchSessionTool(stringShim, stringBridge, 'session_update_turn', { response: 'R' });
+    expect(stringResult.payload.message).toContain('string failure');
   });
 
   test('query history uses HTTP fallback when env vars set', async () => {
@@ -1388,6 +1689,64 @@ describe('dispatchSessionTool extra coverage', () => {
       const bridge = { invoke: jest.fn() };
       const result = await dispatchSessionTool(shim, bridge, 'session_query_history', { limit: 5 });
       expect(result.type).toBe('result');
+    } finally {
+      delete process.env.MCPSERVER_API_KEY;
+      delete process.env.MCPSERVER_WORKSPACE_PATH;
+      delete process.env.MCPSERVER_BASE_URL;
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  test('query history HTTP fallback handles error and invalid JSON bodies', async () => {
+    process.env.MCPSERVER_API_KEY = 'test-key';
+    process.env.MCPSERVER_WORKSPACE_PATH = '/tmp';
+    process.env.MCPSERVER_BASE_URL = 'http://localhost:9999';
+
+    let call = 0;
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = jest.fn().mockImplementation(async () => {
+      call++;
+      if (call === 1) {
+        return {
+            ok: false,
+            status: 502,
+            headers: { get: () => 'text/plain' },
+            text: async () => 'bad gateway',
+          };
+      }
+      if (call === 2) {
+        return {
+          ok: false,
+          status: 503,
+          headers: { get: () => 'text/plain' },
+          text: async () => '',
+        };
+      }
+      return {
+        ok: true,
+        headers: { get: () => null },
+        text: async () => '{bad json',
+      };
+    }) as unknown as typeof globalThis.fetch;
+
+    try {
+      const shim = new SessionShim();
+      const bridge = { invoke: jest.fn() };
+      const errorResult = await dispatchSessionTool(shim, bridge, 'session_query_history', { limit: 5 });
+      expect(errorResult).toEqual({
+        type: 'error',
+        payload: {
+          code: 'http_error',
+          message: 'session log query HTTP fallback returned HTTP 502: bad gateway',
+        },
+      });
+
+      const emptyErrorResult = await dispatchSessionTool(shim, bridge, 'session_query_history', { limit: 5 });
+      expect(emptyErrorResult.payload.message).toBe('session log query HTTP fallback returned HTTP 503');
+
+      const invalidJsonResult = await dispatchSessionTool(shim, bridge, 'session_query_history', { limit: 5 });
+      expect(invalidJsonResult.payload.result).toBe('{bad json');
+      expect(bridge.invoke).not.toHaveBeenCalled();
     } finally {
       delete process.env.MCPSERVER_API_KEY;
       delete process.env.MCPSERVER_WORKSPACE_PATH;

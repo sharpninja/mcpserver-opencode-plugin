@@ -4,6 +4,17 @@ import { cacheDelete, cacheWrite } from '../cache/cache-manager.js';
 
 const STATUS_ENUM = ['pending', 'in_progress', 'completed', 'deferred'] as const;
 const PRIORITY_ENUM = ['critical', 'high', 'medium', 'low'] as const;
+const ACCEPTANCE_CRITERION_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    text: { type: 'string' },
+    isSatisfied: { type: 'boolean' },
+    evidence: { type: 'string' },
+  },
+  required: ['text'],
+} as const;
+const ACCEPTANCE_CRITERIA_ARRAY = { type: 'array', items: ACCEPTANCE_CRITERION_SCHEMA } as const;
 
 export const requirementsTools: ToolDescriptor[] = [
   {
@@ -38,6 +49,7 @@ export const requirementsTools: ToolDescriptor[] = [
         priority: { type: 'string', enum: [...PRIORITY_ENUM] },
         area: { type: 'string' },
         notes: { type: 'string' },
+        acceptanceCriteria: ACCEPTANCE_CRITERIA_ARRAY,
       },
       required: ['id', 'title', 'description', 'priority', 'area'],
     },
@@ -54,6 +66,7 @@ export const requirementsTools: ToolDescriptor[] = [
         status: { type: 'string', enum: [...STATUS_ENUM] },
         priority: { type: 'string', enum: [...PRIORITY_ENUM] },
         notes: { type: 'string' },
+        acceptanceCriteria: ACCEPTANCE_CRITERIA_ARRAY,
       },
       required: ['id'],
     },
@@ -92,6 +105,7 @@ export const requirementsTools: ToolDescriptor[] = [
         area: { type: 'string' },
         subarea: { type: 'string' },
         notes: { type: 'string' },
+        acceptanceCriteria: ACCEPTANCE_CRITERIA_ARRAY,
       },
       required: ['id', 'title', 'description', 'priority', 'area', 'subarea'],
     },
@@ -107,6 +121,7 @@ export const requirementsTools: ToolDescriptor[] = [
         description: { type: 'string' },
         status: { type: 'string', enum: [...STATUS_ENUM] },
         notes: { type: 'string' },
+        acceptanceCriteria: ACCEPTANCE_CRITERIA_ARRAY,
       },
       required: ['id'],
     },
@@ -143,6 +158,7 @@ export const requirementsTools: ToolDescriptor[] = [
         priority: { type: 'string', enum: [...PRIORITY_ENUM] },
         area: { type: 'string' },
         notes: { type: 'string' },
+        acceptanceCriteria: ACCEPTANCE_CRITERIA_ARRAY,
       },
       required: ['id', 'title', 'description', 'priority', 'area'],
     },
@@ -158,6 +174,7 @@ export const requirementsTools: ToolDescriptor[] = [
         description: { type: 'string' },
         status: { type: 'string', enum: [...STATUS_ENUM] },
         notes: { type: 'string' },
+        acceptanceCriteria: ACCEPTANCE_CRITERIA_ARRAY,
       },
       required: ['id'],
     },
@@ -169,6 +186,19 @@ export const requirementsTools: ToolDescriptor[] = [
       type: 'object',
       properties: { id: { type: 'string' } },
       required: ['id'],
+    },
+  },
+  {
+    name: 'req_copy_acceptance_criteria_from_todo',
+    description: 'Copy structured acceptance criteria from an execution TODO onto an FR, TR, or TEST requirement.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['fr', 'tr', 'test', 'functional', 'technical', 'testing'] },
+        id: { type: 'string', description: 'Requirement ID to receive the TODO acceptance criteria.' },
+        todoId: { type: 'string', description: 'Execution TODO ID that supplies acceptanceCriteria.' },
+      },
+      required: ['kind', 'id', 'todoId'],
     },
   },
   {
@@ -266,6 +296,7 @@ const workflowMethodMap: Record<string, string> = {
   req_create_test: 'workflow.requirements.createTest',
   req_update_test: 'workflow.requirements.updateTest',
   req_delete_test: 'workflow.requirements.deleteTest',
+  req_copy_acceptance_criteria_from_todo: 'workflow.requirements.copyAcceptanceCriteriaFromTodo',
   req_list_mappings: 'workflow.requirements.listMappings',
   req_create_mapping: 'workflow.requirements.createMapping',
   req_delete_mapping: 'workflow.requirements.deleteMapping',
@@ -294,10 +325,13 @@ const typedMethodMap: Record<string, string> = {
   req_ingest_document: 'client.Requirements.IngestAsync',
 };
 
+const workflowOnlyRequirementsTools = new Set(['req_copy_acceptance_criteria_from_todo']);
+
 const mutatingRequirementsTools = new Set([
   'req_create_fr', 'req_update_fr', 'req_delete_fr',
   'req_create_tr', 'req_update_tr', 'req_delete_tr',
   'req_create_test', 'req_update_test', 'req_delete_test',
+  'req_copy_acceptance_criteria_from_todo',
   'req_create_mapping', 'req_delete_mapping',
   'req_generate_document', 'req_ingest_document',
 ]);
@@ -306,7 +340,7 @@ export function canHandleRequirementsTool(name: string): boolean {
   return name in workflowMethodMap;
 }
 
-function stringArg(args: Record<string, unknown>, ...keys: string[]): string {
+export function stringArg(args: Record<string, unknown>, ...keys: string[]): string {
   for (const key of keys) {
     const value = args[key];
     if (typeof value === 'string' && value.length > 0) return value;
@@ -314,7 +348,7 @@ function stringArg(args: Record<string, unknown>, ...keys: string[]): string {
   return '';
 }
 
-function workflowDocType(value: unknown): string {
+export function workflowDocType(value: unknown): string {
   switch (value) {
     case 'functional': return 'fr';
     case 'technical': return 'tr';
@@ -326,7 +360,7 @@ function workflowDocType(value: unknown): string {
   }
 }
 
-function typedDocType(value: unknown): string {
+export function typedDocType(value: unknown): string {
   switch (value) {
     case 'fr': return 'functional';
     case 'tr': return 'technical';
@@ -338,7 +372,7 @@ function typedDocType(value: unknown): string {
   }
 }
 
-function workflowParams(name: string, args: Record<string, unknown>): Record<string, unknown> {
+export function workflowParams(name: string, args: Record<string, unknown>): Record<string, unknown> {
   if (name !== 'req_generate_document') return args;
   return {
     format: typeof args.format === 'string' ? args.format : 'markdown',
@@ -354,14 +388,14 @@ function requestParam(request: Record<string, unknown>): Record<string, unknown>
   return { request };
 }
 
-function listParam(args: Record<string, unknown>, pluralKey: string, singleKey: string): string[] {
+export function listParam(args: Record<string, unknown>, pluralKey: string, singleKey: string): string[] {
   const plural = args[pluralKey];
   if (Array.isArray(plural)) return plural.filter((value): value is string => typeof value === 'string');
   const single = args[singleKey];
   return typeof single === 'string' && single.length > 0 ? [single] : [];
 }
 
-function typedParams(name: string, args: Record<string, unknown>): Record<string, unknown> {
+export function typedParams(name: string, args: Record<string, unknown>): Record<string, unknown> {
   switch (name) {
     case 'req_list_fr':
     case 'req_list_tr':
@@ -383,6 +417,7 @@ function typedParams(name: string, args: Record<string, unknown>): Record<string
         id: stringArg(args, 'id'),
         title: stringArg(args, 'title'),
         body: stringArg(args, 'description', 'body'),
+        ...(Array.isArray(args.acceptanceCriteria) ? { acceptanceCriteria: args.acceptanceCriteria } : {}),
       });
 
     case 'req_update_fr':
@@ -392,6 +427,7 @@ function typedParams(name: string, args: Record<string, unknown>): Record<string
         request: {
           title: stringArg(args, 'title'),
           body: stringArg(args, 'description', 'body'),
+          ...(Array.isArray(args.acceptanceCriteria) ? { acceptanceCriteria: args.acceptanceCriteria } : {}),
         },
       };
 
@@ -399,12 +435,23 @@ function typedParams(name: string, args: Record<string, unknown>): Record<string
       return requestParam({
         id: stringArg(args, 'id'),
         condition: stringArg(args, 'description', 'condition'),
+        ...(Array.isArray(args.acceptanceCriteria) ? { acceptanceCriteria: args.acceptanceCriteria } : {}),
       });
 
     case 'req_update_test':
       return {
         id: stringArg(args, 'id'),
-        request: { condition: stringArg(args, 'description', 'condition') },
+        request: {
+          condition: stringArg(args, 'description', 'condition'),
+          ...(Array.isArray(args.acceptanceCriteria) ? { acceptanceCriteria: args.acceptanceCriteria } : {}),
+        },
+      };
+
+    case 'req_copy_acceptance_criteria_from_todo':
+      return {
+        kind: stringArg(args, 'kind'),
+        id: stringArg(args, 'id'),
+        todoId: stringArg(args, 'todoId'),
       };
 
     case 'req_create_mapping':
@@ -458,7 +505,7 @@ function isEmptyResult(response: ReplResponse): boolean {
   );
 }
 
-function normalizeGenerateResponse(response: ReplResponse): ReplResponse {
+export function normalizeGenerateResponse(response: ReplResponse): ReplResponse {
   const result = (response.payload as { result?: Record<string, unknown> }).result;
   if (!result) return response;
 
@@ -490,11 +537,11 @@ function normalizeGenerateResponse(response: ReplResponse): ReplResponse {
   };
 }
 
-function isWikiGenerate(name: string, args: Record<string, unknown>): boolean {
+export function isWikiGenerate(name: string, args: Record<string, unknown>): boolean {
   return name === 'req_generate_document' && (typeof args.format === 'string' ? args.format : 'markdown') === 'wiki';
 }
 
-function hasZipContent(response: ReplResponse): boolean {
+export function hasZipContent(response: ReplResponse): boolean {
   const result = (response.payload as { result?: Record<string, unknown> }).result;
   if (!result) return false;
   const contentType = typeof result.contentType === 'string' ? result.contentType : '';
@@ -502,7 +549,7 @@ function hasZipContent(response: ReplResponse): boolean {
   return typeof result.contentBase64 === 'string' && (/zip/i.test(contentType) || /\.zip$/i.test(fileName));
 }
 
-async function generateDocumentHttpFallback(args: Record<string, unknown>): Promise<ReplResponse | null> {
+export async function generateDocumentHttpFallback(args: Record<string, unknown>): Promise<ReplResponse | null> {
   const format = typeof args.format === 'string' ? args.format : 'markdown';
   if (format !== 'wiki') return null;
 
@@ -560,6 +607,10 @@ async function invokeRequirementsTool(name: string, args: Record<string, unknown
     } else {
       return workflowResponse;
     }
+  }
+
+  if (workflowOnlyRequirementsTools.has(name)) {
+    return workflowResponse;
   }
 
   const typedMethod = typedMethodMap[name];
