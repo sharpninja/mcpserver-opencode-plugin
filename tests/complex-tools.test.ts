@@ -10,16 +10,24 @@ describe('requirements tool handlers', () => {
     expect(canHandleRequirementsTool('req_list_fr')).toBe(true);
     expect(canHandleRequirementsTool('req_get_fr')).toBe(true);
     expect(canHandleRequirementsTool('req_create_fr')).toBe(true);
+    expect(canHandleRequirementsTool('req_create_fr_batch')).toBe(true);
     expect(canHandleRequirementsTool('req_update_fr')).toBe(true);
+    expect(canHandleRequirementsTool('req_update_fr_batch')).toBe(true);
     expect(canHandleRequirementsTool('req_delete_fr')).toBe(true);
     expect(canHandleRequirementsTool('req_list_tr')).toBe(true);
     expect(canHandleRequirementsTool('req_create_tr')).toBe(true);
+    expect(canHandleRequirementsTool('req_create_tr_batch')).toBe(true);
     expect(canHandleRequirementsTool('req_update_tr')).toBe(true);
+    expect(canHandleRequirementsTool('req_update_tr_batch')).toBe(true);
     expect(canHandleRequirementsTool('req_delete_tr')).toBe(true);
     expect(canHandleRequirementsTool('req_list_test')).toBe(true);
     expect(canHandleRequirementsTool('req_create_test')).toBe(true);
+    expect(canHandleRequirementsTool('req_create_test_batch')).toBe(true);
     expect(canHandleRequirementsTool('req_update_test')).toBe(true);
+    expect(canHandleRequirementsTool('req_update_test_batch')).toBe(true);
     expect(canHandleRequirementsTool('req_delete_test')).toBe(true);
+    expect(canHandleRequirementsTool('req_create_batch')).toBe(true);
+    expect(canHandleRequirementsTool('req_update_batch')).toBe(true);
     expect(canHandleRequirementsTool('req_copy_acceptance_criteria_from_todo')).toBe(true);
     expect(canHandleRequirementsTool('req_list_mappings')).toBe(true);
     expect(canHandleRequirementsTool('req_create_mapping')).toBe(true);
@@ -77,6 +85,25 @@ describe('requirements tool handlers', () => {
     expect(mod.typedParams('req_update_test', { id: 'TEST-2', acceptanceCriteria })).toEqual({
       id: 'TEST-2',
       request: { condition: '', acceptanceCriteria },
+    });
+    const directRecords = [{ id: 'FR-DIRECT-001', title: 'Direct' }];
+    expect(mod.typedParams('req_update_fr_batch', { records: directRecords })).toEqual({
+      request: { records: directRecords },
+    });
+    expect(mod.parseRecordsValue(directRecords)).toBe(directRecords);
+    expect(mod.parseRecordsValue('')).toBe('');
+    expect(mod.parseRecordsValue('records: [')).toBe('records: [');
+    expect(mod.parseRecordsValue('foo: bar')).toBe('foo: bar');
+    expect(mod.parseRecordsValue('records:\n- id: FR-YAML-001\n  title: YAML')).toEqual([
+      { id: 'FR-YAML-001', title: 'YAML' },
+    ]);
+    expect(mod.parseRecordsValue('[{"id":"FR-JSON-001","title":"JSON"}]')).toEqual([
+      { id: 'FR-JSON-001', title: 'JSON' },
+    ]);
+    const nonBatchArgs = { records: '[{"id":"FR-UNCHANGED-001"}]' };
+    expect(mod.normalizeRequirementArgs('req_list_fr', nonBatchArgs)).toBe(nonBatchArgs);
+    expect(mod.normalizeRequirementArgs('req_update_fr_batch', { records: 'records:\n- id: FR-NORM-001' })).toEqual({
+      records: [{ id: 'FR-NORM-001' }],
     });
     expect(mod.typedParams('req_copy_acceptance_criteria_from_todo', { kind: 'fr', id: 'FR-1', todoId: 'TODO-1' })).toEqual({
       kind: 'fr',
@@ -742,6 +769,93 @@ describe('requirements tool handlers', () => {
       todoId: 'PLAN-MCP-001',
     });
   });
+
+  test('req_copy_acceptance_criteria_from_todo does not fall back to a typed method', async () => {
+    const { handleRequirementsTool } = await import('../src/tools/requirements.js');
+    const bridge = {
+      invoke: jest.fn().mockResolvedValue({ type: 'error', payload: { code: 'copy_failed', message: 'copy failed' } }),
+    } as unknown as ReplBridge;
+
+    await expect(handleRequirementsTool(
+      'req_copy_acceptance_criteria_from_todo',
+      { kind: 'fr', id: 'FR-AC-001', todoId: 'PLAN-MCP-001' },
+      bridge,
+    )).rejects.toThrow(/copy_failed/);
+
+    expect(bridge.invoke).toHaveBeenCalledTimes(1);
+    expect(bridge.invoke).toHaveBeenCalledWith('workflow.requirements.copyAcceptanceCriteriaFromTodo', {
+      kind: 'fr',
+      id: 'FR-AC-001',
+      todoId: 'PLAN-MCP-001',
+    });
+  });
+
+  test('handleRequirementsTool updateFrBatch parses PowerShell YAML string records before invoking bridge', async () => {
+    const { handleRequirementsTool } = await import('../src/tools/requirements.js');
+    const bridge = {
+      invoke: jest.fn().mockResolvedValue({ type: 'result', payload: { result: { items: [] } } }),
+    } as unknown as ReplBridge;
+
+    const recordsYaml = `records:
+- id: FR-LOC-001
+  title: Monitor device location
+  description: The system SHALL monitor the device location while tracking is enabled.
+  priority: high
+  status: pending
+  area: LOC
+  acceptanceCriteria:
+  - id: FR-LOC-001-AC001
+    text: Demonstrates behavior for FR-LOC-001.
+    isSatisfied: false`;
+
+    await handleRequirementsTool('req_update_fr_batch', { records: recordsYaml }, bridge);
+
+    expect(bridge.invoke).toHaveBeenCalledWith('workflow.requirements.updateFrBatch', {
+      records: [
+        {
+          id: 'FR-LOC-001',
+          title: 'Monitor device location',
+          description: 'The system SHALL monitor the device location while tracking is enabled.',
+          priority: 'high',
+          status: 'pending',
+          area: 'LOC',
+          acceptanceCriteria: [
+            {
+              id: 'FR-LOC-001-AC001',
+              text: 'Demonstrates behavior for FR-LOC-001.',
+              isSatisfied: false,
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  test('handleRequirementsTool createBatch parses inline JSON array records before invoking bridge', async () => {
+    const { handleRequirementsTool } = await import('../src/tools/requirements.js');
+    const bridge = {
+      invoke: jest.fn().mockResolvedValue({ type: 'result', payload: { result: { items: [] } } }),
+    } as unknown as ReplBridge;
+    const recordsJson = '[{"kind":"fr","id":"FR-LOC-001","title":"Monitor device location","description":"The system SHALL monitor the device location while tracking is enabled.","priority":"high","status":"pending","area":"LOC","acceptanceCriteria":[{"id":"FR-LOC-001-AC001","text":"Demonstrates behavior for FR-LOC-001.","isSatisfied":false}]}]';
+
+    await handleRequirementsTool('req_create_batch', { records: recordsJson }, bridge);
+
+    expect(bridge.invoke).toHaveBeenCalledWith('workflow.requirements.createBatch', {
+      records: [
+        expect.objectContaining({
+          kind: 'fr',
+          id: 'FR-LOC-001',
+          acceptanceCriteria: [
+            expect.objectContaining({
+              id: 'FR-LOC-001-AC001',
+              isSatisfied: false,
+            }),
+          ],
+        }),
+      ],
+    });
+  });
+
   test('handleRequirementsTool createFr forwards acceptanceCriteria to workflow', async () => {
     const { handleRequirementsTool } = await import('../src/tools/requirements.js');
     const invoke = jest
