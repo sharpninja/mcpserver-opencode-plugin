@@ -36,6 +36,20 @@ cp -r dist/ .opencode/plugins/mcpserver-opencode-plugin
 The plugin auto-bootstraps from `AGENTS-README-FIRST.yaml` marker files and
 delegates all MCP operations through `mcpserver-repl --agent-stdio`.
 
+## Tool Name Surfaces
+
+OpenCode-visible tools use this plugin's host-facing names, such as
+`session_begin_turn`, `todo_query`, and `req_generate_document`. The plugin may
+delegate internally to `workflow.sessionlog.*`, `workflow.todo.*`, and
+`workflow.requirements.*` through the workflow/REPL shim. Those `workflow.*`
+names are distinct from native McpServer `/mcp-transport` tool names such as
+`sessionlog_*`, `todo_*`, and `requirements_*`, and from hosted-agent aliases
+such as `mcp_session_*`.
+
+Do not treat the absence of literal `workflow.*` names from generic MCP tool
+discovery as proof that this plugin is unavailable. Validate OpenCode plugin
+registration and the host-facing tool list instead.
+
 Available tools:
 
 - **Workspace**: `workspace_ensure`
