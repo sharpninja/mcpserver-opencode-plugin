@@ -5,6 +5,7 @@ import { fullBootstrap, type MarkerContext } from './discovery/marker-resolver.j
 import { cacheFlush } from './cache/cache-manager.js';
 import { todoTools, canHandleTodoTool, handleTodoTool } from './tools/todo.js';
 import { sessionTools, canHandleSessionTool, handleSessionTool } from './tools/session.js';
+import { memoryTools, canHandleMemoryTool, handleMemoryTool } from './tools/memory.js';
 import { requirementsTools, canHandleRequirementsTool, handleRequirementsTool } from './tools/requirements.js';
 import { graphragTools, canHandleGraphragTool, handleGraphragTool } from './tools/graphrag.js';
 import { workspaceTools, canHandleWorkspaceTool, handleWorkspaceTool } from './tools/workspace.js';
@@ -25,6 +26,7 @@ export const allToolDescriptors: ToolDescriptor[] = [
   ...workspaceTools,
   ...todoTools,
   ...sessionTools,
+  ...memoryTools,
   ...requirementsTools,
   ...graphragTools,
 ];
@@ -254,6 +256,7 @@ export async function createMcpServerPlugin(
       if (canHandleWorkspaceTool(name)) return wrapResult(await handleWorkspaceTool(name, args, bridge, setupWorkspacePath), name);
       if (canHandleTodoTool(name)) return wrapResult(await handleTodoTool(name, args, bridge), name);
       if (canHandleSessionTool(name)) return wrapResult(await handleSessionTool(name, args, bridge), name);
+      if (canHandleMemoryTool(name)) return wrapResult(await handleMemoryTool(name, args, bridge), name);
       if (canHandleRequirementsTool(name)) return wrapResult(await handleRequirementsTool(name, args, bridge), name);
       if (canHandleGraphragTool(name)) return wrapResult(await handleGraphragTool(name, args, bridge), name);
       throw new Error(`Unknown tool: ${name}`);
