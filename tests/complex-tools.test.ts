@@ -1,5 +1,8 @@
 import { jest } from '@jest/globals';
 import type { ReplBridge } from '../src/transport/repl-bridge.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 /* ================================================================
  * requirements tool handler tests
@@ -896,6 +899,53 @@ describe('requirements tool handlers', () => {
       id: 'TEST-001',
       request: { condition: 'Should pass', acceptanceCriteria },
     });
+  });
+
+  test('handleRequirementsTool updateFr forwards criteria-only acceptanceCriteria to typed fallback', async () => {
+    const { handleRequirementsTool } = await import('../src/tools/requirements.js');
+    const invoke = jest
+      .fn<(...args: any[]) => any>()
+      .mockResolvedValueOnce({ type: 'result', payload: { result: {} } })
+      .mockResolvedValueOnce({ type: 'result', payload: { result: { id: 'FR-AC-201' } } });
+    const bridge = { invoke } as unknown as ReplBridge;
+
+    const acceptanceCriteria = [{ id: 'caller-ac-1', text: 'caller criterion text', isSatisfied: false }];
+
+    await handleRequirementsTool('req_update_fr', {
+      id: 'FR-AC-201', acceptanceCriteria,
+    }, bridge);
+
+    expect(invoke).toHaveBeenNthCalledWith(2, 'client.Requirements.UpdateFrAsync', {
+      id: 'FR-AC-201',
+      request: { title: '', body: '', acceptanceCriteria },
+    });
+  });
+
+  test('handleRequirementsTool fails when supplied acceptanceCriteria returns empty', async () => {
+    const { handleRequirementsTool } = await import('../src/tools/requirements.js');
+    const invoke = jest
+      .fn<(...args: any[]) => any>()
+      .mockResolvedValueOnce({ type: 'result', payload: { result: {} } })
+      .mockResolvedValueOnce({
+        type: 'result',
+        payload: { result: { success: true, item: { id: 'FR-AC-202', acceptanceCriteria: [] } } },
+      });
+    const bridge = { invoke } as unknown as ReplBridge;
+
+    const oldFailsafeDir = process.env.MCPSERVER_FAILSAFE_DIR;
+    const failsafeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-req-ac-failsafe-'));
+    process.env.MCPSERVER_FAILSAFE_DIR = failsafeDir;
+
+    try {
+      await expect(handleRequirementsTool('req_update_fr', {
+        id: 'FR-AC-202',
+        acceptanceCriteria: [{ id: 'caller-ac-1', text: 'caller criterion text' }],
+      }, bridge)).rejects.toThrow(/requirements_acceptance_criteria_not_captured/);
+    } finally {
+      if (oldFailsafeDir === undefined) delete process.env.MCPSERVER_FAILSAFE_DIR;
+      else process.env.MCPSERVER_FAILSAFE_DIR = oldFailsafeDir;
+      fs.rmSync(failsafeDir, { recursive: true, force: true });
+    }
   });
 
   test('handleRequirementsTool createTr forwards acceptanceCriteria to typed fallback request body', async () => {
