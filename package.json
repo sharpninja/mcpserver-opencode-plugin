@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "@opencode-ai/plugin": "latest",
+    "@sharpninja/mcpserver-plugin-core": "file:vendor/sharpninja-mcpserver-plugin-core-0.1.0.tgz",
     "js-yaml": "^4.1.0"
   },
   "peerDependencies": {

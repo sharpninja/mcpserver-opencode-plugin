@@ -19,7 +19,7 @@ import { writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createHmac } from 'crypto';
-import type { ReplBridge, ReplResponse } from '../src/transport/repl-bridge.js';
+import type { ReplBridge, ReplResponse } from '@sharpninja/mcpserver-plugin-core';
 
 class FakeBridge {
   calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
@@ -191,6 +191,27 @@ describe('OpenCode McpServer Plugin contract', () => {
     expect(wrapResult({ ok: true }, 'tool')).toEqual({
       output: JSON.stringify({ ok: true }, null, 2),
     });
+  });
+
+  test('jsonSchemaToZodShape tolerates schemas without properties or required', () => {
+    expect(jsonSchemaToZodShape({ name: 'empty_tool', description: 'd', inputSchema: {} })).toEqual({});
+    expect(jsonSchemaToZodShape({ name: 'props_no_required', description: 'd', inputSchema: { type: 'object', properties: { flag: { type: 'boolean' } } } }).flag.safeParse(undefined).success).toBe(true);
+  });
+
+  test('audit hooks coerce non-Error rejections to strings without throwing', async () => {
+    const fake = new FakeBridge();
+    fake.invoke = jest.fn<(...args: any[]) => any>().mockRejectedValue('string failure');
+    const { hooks } = await setupPlugin(fake);
+
+    await hooks.event?.({ event: { type: 'session.start', prompt: 'Non-error rejection path' } });
+    await expect(hooks['tool.execute.before']?.(
+      { tool: 'todo_query', sessionID: 's1', callID: 'c1' },
+      { args: {} },
+    )).resolves.not.toThrow();
+    await expect(hooks['tool.execute.after']?.(
+      { tool: 'todo_query', sessionID: 's1', callID: 'c1', args: {} },
+      { title: 'result', output: 'ok', metadata: {} },
+    )).resolves.not.toThrow();
   });
 
   test('tool execution returns ToolResult and routes through bridge', async () => {
@@ -462,7 +483,10 @@ describe('OpenCode McpServer Plugin contract', () => {
 
     const calls = JSON.stringify(fake.calls);
     expect(calls).toContain('response fallback');
-    expect(calls).toContain('OpenCode run completed.');
+    // The shared core derives the default completion response from the
+    // configured agentName ('TestAgent' here) rather than a hardcoded
+    // 'OpenCode' literal.
+    expect(calls).toContain('TestAgent run completed.');
   });
 
   test('tool audit hooks swallow submit failures', async () => {
