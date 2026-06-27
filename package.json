@@ -1,6 +1,6 @@
 {
   "name": "@sharpninja/mcpserver-opencode-plugin",
-  "version": "1.4.0",
+  "version": "1.11.0",
   "description": "OpenCode plugin for McpServer TODO, session-log, requirements, GraphRAG, workspace initialization, and failsafe replay workflows.",
   "type": "module",
   "main": "dist/index.js",
