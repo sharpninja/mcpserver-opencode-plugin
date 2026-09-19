@@ -30,12 +30,32 @@ export interface PluginInput {
 
 export type PluginOptions = Record<string, unknown>;
 
+export interface ChatMessageInput {
+  sessionID: string;
+  agent?: string;
+  model?: { providerID: string; modelID: string };
+  messageID?: string;
+  variant?: string;
+}
+
+export interface ChatMessagePart {
+  type: string;
+  text?: string;
+  [key: string]: unknown;
+}
+
+export interface ChatMessageOutput {
+  message?: unknown;
+  parts: ChatMessagePart[];
+}
+
 export interface Hooks {
   event?: (input: { event: unknown }) => Promise<void>;
   config?: (input: Record<string, unknown>) => Promise<void>;
   tool?: Record<string, ToolDefinition>;
   auth?: unknown;
   provider?: unknown;
+  'chat.message'?: (input: ChatMessageInput, output: ChatMessageOutput) => Promise<void>;
   'tool.execute.before'?: (input: { tool: string; sessionID: string; callID: string }, output: { args: Record<string, unknown> }) => Promise<void>;
   'tool.execute.after'?: (input: { tool: string; sessionID: string; callID: string; args: Record<string, unknown> }, output: { title: string; output: string; metadata: Record<string, unknown> }) => Promise<void>;
   [key: string]: unknown;

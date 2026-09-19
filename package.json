@@ -19,7 +19,9 @@
   "files": [
     "dist/",
     "lib/",
+    "hooks/",
     "skills/",
+    "memory-descriptor.json",
     "README.md"
   ],
   "keywords": [
