@@ -65,18 +65,21 @@ Available tools:
   `req_list_test`, `req_create_test`, `req_update_test`, `req_delete_test`,
   `req_list_mappings`, `req_create_mapping`, `req_delete_mapping`,
   `req_generate_document`, `req_ingest_document`
-- **Memory**: `memory_list`, `memory_get`, `memory_add`, `memory_update`,
-  `memory_remove`
+- **Memory**: `memory_remember`, `memory_recall`, `memory_explore`,
+  `memory_consolidate`, `memory_promote`, `memory_revert`, `memory_list`,
+  `memory_get`, `memory_add`, `memory_update`, `memory_remove` (aliases for
+  `workflow.memory.*`)
 - **GraphRAG**: `graphrag_status`, `graphrag_index`, `graphrag_query`,
   `graphrag_ingest`, `graphrag_doc_list`, `graphrag_doc_chunks`, `graphrag_doc_delete`,
   `graphrag_entity_create`, `graphrag_entity_list`, `graphrag_entity_get`,
   `graphrag_entity_update`, `graphrag_entity_delete`, `graphrag_rel_create`,
   `graphrag_rel_list`, `graphrag_rel_get`, `graphrag_rel_update`, `graphrag_rel_delete`
 
-OpenCode's current plugin API exposes tools and audit hooks, but it does not
-provide a request-boundary additional-context hook for injecting a `REQUIRED
-MEMORIES` block into the model prompt. Use `memory_list` as the explicit
-fallback until the host exposes that hook.
+The always-on request-boundary path is the OpenCode `chat.message` hook. It
+loads `memory-descriptor.json`, fetches `workflow.memory.list` with
+`scope: Effective`, and injects a `REQUIRED MEMORIES` text part (including the
+explicit `REQUIRED MEMORIES - None.` fallback). The hook is fail-soft: memory
+fetch errors are logged and the request continues.
 
 ## Development
 

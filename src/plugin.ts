@@ -15,7 +15,8 @@ import {
   type ReplBridge,
   type ToolDescriptor,
 } from '@sharpninja/mcpserver-plugin-core';
-import type { ToolResult, Hooks } from './plugin-api.js';
+import type { ToolResult, Hooks, ChatMessageInput, ChatMessageOutput } from './plugin-api.js';
+import { applyRequiredMemoryToChatMessage } from './memory-context.js';
 
 /**
  * Host-glue config for the opencode plugin. The shared transport / cache /
@@ -29,6 +30,7 @@ export interface McpServerPluginConfig {
   agentName?: string;
   sessionTitle?: string;
   workspacePath?: string;
+  pluginRoot?: string;
   bridge?: ReplBridge;
   autoBootstrap?: boolean;
   autoFlushCache?: boolean;
@@ -146,6 +148,8 @@ function isCompleteEvent(name: string): boolean {
 export async function createMcpServerPlugin(
   config: McpServerPluginConfig = {},
 ): Promise<Hooks> {
+  process.env.MCP_PLUGIN_HOST = process.env.MCP_PLUGIN_HOST || 'opencode';
+
   const core: HostContext = createMcpServerPluginCore({
     agentName: config.agentName ?? 'OpenCode',
     pluginId: 'opencode',
@@ -190,6 +194,24 @@ export async function createMcpServerPlugin(
 
   return {
     tool: hooksTools as Record<string, never>,
+    'chat.message': async (
+      _input: ChatMessageInput,
+      output: ChatMessageOutput,
+    ): Promise<void> => {
+      try {
+        if (!output || typeof output !== 'object') return;
+        if (!Array.isArray(output.parts)) output.parts = [];
+        await applyRequiredMemoryToChatMessage(output, {
+          pluginRoot: config.pluginRoot,
+          host: 'opencode',
+          bridge: core.bridge,
+        });
+      } catch (error) {
+        process.stderr.write(
+          `[mcpserver-opencode] chat.message required-memory injection skipped: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      }
+    },
     event: async (input: { event: unknown }): Promise<void> => {
       const name = eventName(input);
       if (!name) return;

@@ -82,6 +82,68 @@ describe('OpenCode McpServer Plugin contract', () => {
     expect(hooks).toHaveProperty('tool');
     expect(Object.prototype.hasOwnProperty.call(hooks, 'tool.execute.before')).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(hooks, 'tool.execute.after')).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(hooks, 'chat.message')).toBe(true);
+  });
+
+  test('chat.message injects required memories as request-boundary parts', async () => {
+    const fake = new FakeBridge();
+    fake.nextResponse = {
+      type: 'result',
+      payload: { result: { items: [{ id: 'MEMORY-REQ-001', text: 'Injected at the request boundary.' }] } },
+    };
+    const { hooks } = await setupPlugin(fake);
+    const output = { parts: [{ type: 'text', text: 'user prompt' }] };
+
+    await hooks['chat.message']?.(
+      { sessionID: 'session-memory-1' },
+      output,
+    );
+
+    expect(output.parts).toEqual([
+      { type: 'text', text: 'user prompt' },
+      { type: 'text', text: 'REQUIRED MEMORIES - MEMORY-REQ-001: Injected at the request boundary.' },
+    ]);
+    expect(fake.calls.map((call) => call.method)).toContain('workflow.memory.list');
+    expect(fake.calls.find((call) => call.method === 'workflow.memory.list')?.params).toEqual({
+      scope: 'Effective',
+    });
+  });
+
+  test('chat.message injects explicit None and keeps going when memory fetch fails', async () => {
+    const fake = new FakeBridge();
+    fake.invoke = jest.fn<(...args: any[]) => any>().mockRejectedValue(new Error('mcp unavailable'));
+    const { hooks } = await setupPlugin(fake);
+    const output = { parts: [{ type: 'text', text: 'continue without memory server' }] };
+
+    await expect(hooks['chat.message']?.(
+      { sessionID: 'session-memory-fail' },
+      output,
+    )).resolves.not.toThrow();
+    expect(output.parts).toEqual([
+      { type: 'text', text: 'continue without memory server' },
+      { type: 'text', text: 'REQUIRED MEMORIES - None.' },
+    ]);
+  });
+
+  test('chat.message fail-softs when output is missing', async () => {
+    const { hooks } = await setupPlugin();
+    await expect(hooks['chat.message']?.(
+      { sessionID: 'session-memory-missing' },
+      undefined as never,
+    )).resolves.not.toThrow();
+  });
+
+  test('chat.message creates parts when the host omitted them', async () => {
+    const fake = new FakeBridge();
+    fake.nextResponse = { type: 'result', payload: { result: { items: [] } } };
+    const { hooks } = await setupPlugin(fake);
+    const output = {} as { parts: Array<{ type: string; text?: string }> };
+
+    await hooks['chat.message']?.(
+      { sessionID: 'session-memory-empty' },
+      output,
+    );
+    expect(output.parts).toEqual([{ type: 'text', text: 'REQUIRED MEMORIES - None.' }]);
   });
 
   test('registers all expected tools including workspace_ensure', async () => {
