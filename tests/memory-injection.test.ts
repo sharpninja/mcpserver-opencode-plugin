@@ -1,6 +1,10 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import {
   applyRequiredMemoryToChatMessage,
@@ -239,6 +243,10 @@ payload:
     expect(created).toEqual([{ type: 'text', text: 'REQUIRED MEMORIES - None.' }]);
   });
 
+  test('falls through invalid JSON-looking payloads to an empty item list', () => {
+    expect(convertToMemoryItems('{% not-json and not-yaml')).toEqual([]);
+  });
+
   test('parses JSON, YAML, and line-oriented memory items', () => {
     expect(
       convertToMemoryItems({ payload: { result: { items: [{ id: 'MEMORY-REQ-002', text: 'From object.' }] } } }),
@@ -288,6 +296,32 @@ payload:
     }
   });
 
+  test('uses MCP_PLUGIN_REPL_RESPONSE when the REPL log seam has no memory stub', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-memory-repl-'));
+    const log = path.join(tmp, 'repl-log.txt');
+    fs.writeFileSync(log, '');
+    process.env.MCP_PLUGIN_REPL_LOG = log;
+    process.env.MCP_PLUGIN_REPL_RESPONSE = JSON.stringify({
+      payload: { result: { items: [{ id: 'MEMORY-REQ-009', text: 'From plugin env.' }] } },
+    });
+    delete process.env.MCP_MEMORY_REPL_RESPONSE;
+    try {
+      const context = await getRequiredMemoryContext({ pluginRoot: root });
+      expect(context).toBe('REQUIRED MEMORIES - MEMORY-REQ-009: From plugin env.');
+      await expect(
+        invokeMemoryWorkflow('memory_list', { scope: 'Effective' }, { pluginRoot: root }),
+      ).resolves.toContain('MEMORY-REQ-009');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test('throws when no fetch path is available', async () => {
+    await expect(fetchRequiredMemoryResponse({ pluginRoot: root })).rejects.toThrow(
+      'No memory fetch path available',
+    );
+  });
+
   test('reads MCP_MEMORY_REPL_RESPONSE without a REPL log seam', async () => {
     process.env.MCP_MEMORY_REPL_RESPONSE = JSON.stringify({
       result: { Items: [{ id: 'MEMORY-REQ-008', text: 'From memory env.' }] },
@@ -307,6 +341,17 @@ payload:
     };
     const context = await getRequiredMemoryContext({ pluginRoot: root, bridge });
     expect(context).toBe('REQUIRED MEMORIES - MEMORY-REQ-007: From bridge.');
+
+    const stringBridge = {
+      async invoke() {
+        return JSON.stringify({
+          payload: { result: { items: [{ id: 'MEMORY-REQ-010', text: 'From string bridge.' }] } },
+        });
+      },
+    };
+    await expect(getRequiredMemoryContext({ pluginRoot: root, bridge: stringBridge })).resolves.toBe(
+      'REQUIRED MEMORIES - MEMORY-REQ-010: From string bridge.',
+    );
   });
 
   test('invokeMemoryWorkflow resolves aliases through the descriptor registry', async () => {

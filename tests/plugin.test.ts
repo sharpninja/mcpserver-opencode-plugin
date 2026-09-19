@@ -125,6 +125,16 @@ describe('OpenCode McpServer Plugin contract', () => {
     ]);
   });
 
+  test('chat.message fail-softs when mutating frozen parts throws', async () => {
+    const { hooks } = await setupPlugin();
+    const output = { parts: Object.freeze([{ type: 'text', text: 'frozen prompt' }]) as Array<{ type: string; text?: string }> };
+    await expect(hooks['chat.message']?.(
+      { sessionID: 'session-memory-frozen' },
+      output,
+    )).resolves.not.toThrow();
+    expect(output.parts).toEqual([{ type: 'text', text: 'frozen prompt' }]);
+  });
+
   test('chat.message fail-softs when output is missing', async () => {
     const { hooks } = await setupPlugin();
     await expect(hooks['chat.message']?.(
