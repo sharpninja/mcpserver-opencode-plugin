@@ -1,3 +1,4 @@
+import './qbrain-env.js';
 import { z } from 'zod';
 import {
   createMcpServerPluginCore,
